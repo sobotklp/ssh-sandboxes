@@ -9,7 +9,7 @@
     "start": "babel-node --presets=es2015 main.js"
   },
   "engines": {
-    "node": ">=5.0.0"
+    "node": ">=0.10.0"
   },
   "dependencies": {
     "ssh2": "0.5.0",

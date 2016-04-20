@@ -9,7 +9,7 @@ import NodeRSA from 'node-rsa'
 const docker = new Docker()
 
 // Generate a temporary, throwaway private key.
-const key = new NodeRSA({b: 2048})
+const key = new NodeRSA({b: 1024})
 const privKey = key.exportKey('pkcs1-private-pem')
 
 const TIMEOUT = 100000
@@ -17,7 +17,7 @@ const TIMEOUT = 100000
 new ssh2.Server({
   hostKeys: [ privKey ],
   banner: "Welcome!",
-  ident: "ssh-to-docker",
+  ident: "ssh-sandboxes",
 }, (client) => {
   console.log("Client connected!")
     
