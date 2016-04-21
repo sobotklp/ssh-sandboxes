@@ -27,38 +27,34 @@ new ssh2.Server({
       console.log('Client wants new session')
       var session = accept()
       session.once('pty', (accept, reject, info) => {
-//        console.log('Client wants a ptty: ' + util.inspect(info))
         accept()
       })
       session.once('shell', (accept, reject) => {
         console.log('Client wants a shell!')
-        var stream = accept()
+        let container = null
+        const stream = accept()
         stream.write('Let\'s look at some code!\n')
-        stream.on('data', (chunk) => {
-          console.log('got %d bytes of data', chunk.length)
-        })
+
         docker.createContainer({
           Cmd: '/bin/bash',
           Image: 'ubuntu:latest',
           OpenStdin: true,
           Tty: true
-        }, function (err, container) {
-          console.log(util.inspect(container))
+        }, function (err, newContainer) {
+          container = newContainer
           container.attach({
             stream: true, stdin: true, stdout: true, stderr: true
           }, function (err, ttyStream) {
-            console.log("Attached to container " + container.id)
-ttyStream.on('data', (chunk) => {
-  console.log('got %d bytes from container', chunk.length)
-  console.log(chunk);
-})
+            console.log("Attached to container " + newContainer.id)
+
             // Attach output streams to client stream.
             ttyStream.pipe(stream);
 
             // Attach client stream to stdin of container
             stream.pipe(ttyStream);
 
-            container.start((err, data) => {
+            // Start the container
+            newContainer.start((err, data) => {
               if (err) {
                 console.error('Unable to start container', err)
                 return
@@ -67,15 +63,30 @@ ttyStream.on('data', (chunk) => {
             })
           })
         })
-        /*docker.run('ubuntu', ['bash'], stream, function(err, data, container) {
-          console.log(util.inspect(data))
-          if (err) {
-            console.error(err)
-            stream.exit(0)
-            stream.end()
+
+        const onTimeout = function () {
+          console.log('Closing session due to timeout')
+
+          if (container) {
+            container.remove({force: true}, function(err, data) {
+              if (err) {
+                console.log('Error removing container %s: %s', container.id, err)
+              }
+              console.log('Removed container')
+            })
           }
-        
-        })*/
+
+          stream.close()
+        }
+
+        stream.on('data', function(chunk) {
+          // Reset timeout
+          if (stream.timeoutId) {
+            clearTimeout(stream.timeoutId)
+          }
+          stream.timeoutId = setTimeout(onTimeout, 10000)
+        })
+
       })
     })
   }).on('abort', () => {
