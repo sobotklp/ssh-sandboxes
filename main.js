@@ -1,5 +1,6 @@
 import fs from 'fs'
 import util from 'util'
+import EventEmitter from 'events'
 
 import Docker from 'dockerode'
 import ssh2 from 'ssh2'
@@ -10,6 +11,8 @@ const docker = new Docker()
 // Generate a temporary, throwaway private key.
 const key = new NodeRSA({b: 2048})
 const privKey = key.exportKey('pkcs1-private-pem')
+
+const TIMEOUT = 100000
 
 new ssh2.Server({
   hostKeys: [ privKey ],
@@ -32,8 +35,24 @@ new ssh2.Server({
       session.once('shell', (accept, reject) => {
         console.log('Client wants a shell!')
         let container = null
+
+        // Accept the connection and get a bidirectional stream.
         const stream = accept()
-        stream.write('Let\'s look at some code!\n')
+
+        var cleanupStream = function() {
+          if (stream.timeoutId) {
+            clearTimeout(stream.timeoutId)
+          }
+
+          if (container) {
+            container.remove({force: true}, function(err, data) {
+              if (err) {
+                console.log('Error removing container %s: %s', container.id, err)
+              }
+              console.log('Removed container')
+            })
+          }
+        }
 
         docker.createContainer({
           Cmd: '/bin/bash',
@@ -41,6 +60,12 @@ new ssh2.Server({
           OpenStdin: true,
           Tty: true
         }, function (err, newContainer) {
+          if (err) {
+            console.log(err)
+            closeStream()
+            return
+          }
+
           container = newContainer
           container.attach({
             stream: true, stdin: true, stdout: true, stderr: true
@@ -57,6 +82,7 @@ new ssh2.Server({
             newContainer.start((err, data) => {
               if (err) {
                 console.error('Unable to start container', err)
+                closeStream()
                 return
               }
               console.log("Container started!")
@@ -66,16 +92,6 @@ new ssh2.Server({
 
         const onTimeout = function () {
           console.log('Closing session due to timeout')
-
-          if (container) {
-            container.remove({force: true}, function(err, data) {
-              if (err) {
-                console.log('Error removing container %s: %s', container.id, err)
-              }
-              console.log('Removed container')
-            })
-          }
-
           stream.close()
         }
 
@@ -84,9 +100,13 @@ new ssh2.Server({
           if (stream.timeoutId) {
             clearTimeout(stream.timeoutId)
           }
-          stream.timeoutId = setTimeout(onTimeout, 10000)
+          stream.timeoutId = setTimeout(onTimeout, TIMEOUT)
         })
 
+        stream.on('end', () => {
+          console.log('Stream disconnected!')
+          cleanupStream()
+        })
       })
     })
   }).on('abort', () => {
